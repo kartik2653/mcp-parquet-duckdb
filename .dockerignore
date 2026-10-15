@@ -1,0 +1,7 @@
+.git
+data
+*.parquet
+.env
+coverage.txt
+bin
+dist

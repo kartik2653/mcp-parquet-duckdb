@@ -1,0 +1,17 @@
+listen_addr: ":8080"
+transport: http
+parquet_path: ./data/parquet/trips.parquet
+dataset_name: trips
+dataset_description: Synthetic fleet trips for local analytics
+metadata_path: ./configs/trips.metadata.example.yaml
+duckdb_memory_limit: 512MB
+temp_dir: ./data/tmp
+query_timeout: 30s
+max_concurrent_queries: 4
+max_result_rows: 100
+max_groups: 100
+max_histogram_bins: 20
+auth_token: change-me
+log_level: info
+default_timezone: UTC
+max_request_bytes: 1048576

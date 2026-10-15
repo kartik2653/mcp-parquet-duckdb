@@ -1,0 +1,66 @@
+description: Fleet trip facts. Each row is one recorded trip. starttime, endtime, and createdat are Unix epoch milliseconds in the CSV and timestamps after conversion.
+columns:
+  fleetid:
+    name: Fleet
+    description: Fleet identifier
+    aggregations: [count, count_distinct, min, max]
+  vehicleid:
+    name: Vehicle
+    description: Vehicle identifier
+    aggregations: [count, count_distinct, min, max]
+  regno:
+    name: Registration
+    description: Vehicle registration number
+    aggregations: [count, count_distinct, min, max]
+  chassisno:
+    name: Chassis
+    description: Chassis number
+    aggregations: [count, count_distinct, min, max]
+  starttime:
+    name: Trip start
+    description: Trip start, stored as epoch milliseconds in the CSV
+  endtime:
+    name: Trip end
+    description: Trip end, stored as epoch milliseconds in the CSV
+  startodo:
+    name: Start odometer
+    description: Odometer at trip start
+    unit: km
+    aggregations: [min, max, avg, count]
+  endodo:
+    name: End odometer
+    description: Odometer at trip end
+    unit: km
+    aggregations: [min, max, avg, count]
+  startsoc:
+    name: Start SOC
+    description: State of charge at trip start
+    unit: percent
+    aggregations: [min, max, avg, count]
+  endsoc:
+    name: End SOC
+    description: State of charge at trip end
+    unit: percent
+    aggregations: [min, max, avg, count]
+  socconsumed:
+    name: SOC consumed
+    description: State of charge used during the trip
+    unit: percent
+    aggregations: [sum, avg, min, max, count]
+  distance:
+    name: Distance
+    description: Trip distance
+    unit: km
+    aggregations: [sum, avg, min, max, count]
+  duration:
+    name: Duration
+    description: Trip duration
+    unit: ms
+    aggregations: [sum, avg, min, max, count]
+  rangevalue:
+    name: Range value
+    description: Range figure supplied with the trip. Sample rows match distance / socconsumed * 100 when socconsumed is nonzero.
+    aggregations: [avg, min, max, count]
+  createdat:
+    name: Created at
+    description: Record creation time, stored as epoch milliseconds in the CSV

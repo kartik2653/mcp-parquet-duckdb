@@ -20,6 +20,15 @@ go.work.sum
 # Vendored dependencies
 /vendor/
 
-# Environment
+# Environment and local data
 .env
 .env.*
+!.env.example
+/data/input/*
+!/data/input/.gitkeep
+/data/parquet/*
+!/data/parquet/.gitkeep
+/data/tmp/
+*.parquet
+*.db
+*.wal

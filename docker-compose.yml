@@ -1,0 +1,21 @@
+services:
+  analytics:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      ANALYTICS_TRANSPORT: http
+      ANALYTICS_LISTEN_ADDR: ":8080"
+      ANALYTICS_PARQUET_PATH: /data/parquet/trips.parquet
+      ANALYTICS_TEMP_DIR: /tmp/duckdb
+      ANALYTICS_DATASET_NAME: trips
+      ANALYTICS_DATASET_DESCRIPTION: Synthetic fleet trips for local analytics
+      ANALYTICS_AUTH_TOKEN: ${ANALYTICS_AUTH_TOKEN:-change-me}
+      ANALYTICS_DEFAULT_TIMEZONE: UTC
+      ANALYTICS_DUCKDB_MEMORY_LIMIT: 512MB
+    volumes:
+      - ./data/parquet:/data/parquet:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    user: "65532:65532"
