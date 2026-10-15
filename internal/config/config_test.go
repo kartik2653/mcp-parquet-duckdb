@@ -45,3 +45,19 @@ func TestHTTPRequiresToken(t *testing.T) {
 		t.Fatal("expected missing token error")
 	}
 }
+
+func TestDatasetPathMustStayInDataDir(t *testing.T) {
+	dir := t.TempDir()
+	cfg := Config{
+		Transport: "stdio", DataDir: filepath.Join(dir, "parquet"),
+		Datasets: []DatasetSpec{{
+			Name: "charge", File: filepath.Join(dir, "secret.parquet"),
+		}},
+		DuckDBMemoryLimit: "256MB", QueryTimeout: time.Second,
+		MaxConcurrentQueries: 1, MaxResultRows: 10, MaxGroups: 10, MaxHistogramBins: 5,
+		LogLevel: "error", DefaultTimezone: "UTC", MaxRequestBytes: 1024,
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected path rejection")
+	}
+}

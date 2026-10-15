@@ -1,0 +1,8 @@
+description: Vehicle alerts. Each row is one alert. The CSV header "alert time" is stored as alert_time.
+columns:
+  alert_time:
+    description: Alert time. The CSV header is "alert time".
+  regno:
+    aggregations: [count, count_distinct]
+  alertlevel:
+    aggregations: [count, count_distinct]

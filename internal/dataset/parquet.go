@@ -122,15 +122,10 @@ func validateParquet(ctx context.Context, db *sql.DB, path string) (int64, []Col
 }
 
 func csvFrom(opt ConvertOptions, projection string) (string, []any) {
-	duckTypes, epochCols := splitTypes(opt.Types)
+	duckTypes, epochCols, strptimeCols := splitTypes(opt.Types)
 	selectList := projection
-	if projection == "*" && len(epochCols) > 0 {
-		replaces := make([]string, len(epochCols))
-		for i, name := range epochCols {
-			quoted, _ := QuoteIdent(name)
-			replaces[i] = "epoch_ms(CAST(" + quoted + " AS BIGINT)) AS " + quoted
-		}
-		selectList = "* REPLACE (" + strings.Join(replaces, ", ") + ")"
+	if projection == "*" {
+		selectList = selectProjection(opt, epochCols, strptimeCols)
 	}
 	parts := []string{
 		"SELECT " + selectList + " FROM read_csv(" + sqlString(opt.Input) + ", header = " + boolSQL(opt.Header) + ", delim = " + sqlString(opt.Delimiter) + ", null_padding = true",
@@ -156,17 +151,86 @@ func csvFrom(opt ConvertOptions, projection string) (string, []any) {
 	return strings.Join(parts, ""), nil
 }
 
-func splitTypes(types map[string]string) (map[string]string, []string) {
+func splitTypes(types map[string]string) (map[string]string, []string, map[string]string) {
 	duckTypes := map[string]string{}
 	var epochCols []string
+	strptimeCols := map[string]string{}
 	for _, name := range sortedKeys(types) {
 		if types[name] == "EPOCH_MS" {
 			epochCols = append(epochCols, name)
 			continue
 		}
+		if format, ok := strings.CutPrefix(types[name], "STRPTIME:"); ok {
+			strptimeCols[name] = format
+			continue
+		}
 		duckTypes[name] = types[name]
 	}
-	return duckTypes, epochCols
+	return duckTypes, epochCols, strptimeCols
+}
+
+func selectProjection(opt ConvertOptions, epochCols []string, strptimeCols map[string]string) string {
+	renamed := map[string]bool{}
+	var excludes []string
+	var extras []string
+	for _, src := range sortedKeys(opt.Rename) {
+		dst := opt.Rename[src]
+		renamed[dst] = true
+		excludes = append(excludes, looseQuote(src))
+		extras = append(extras, convertExpr(looseQuote(src), dst, epochCols, strptimeCols)+" AS "+mustIdent(dst))
+	}
+	var replaces []string
+	for _, name := range epochCols {
+		if renamed[name] {
+			continue
+		}
+		quoted := mustIdent(name)
+		replaces = append(replaces, "epoch_ms(CAST("+quoted+" AS BIGINT)) AS "+quoted)
+	}
+	for _, name := range sortedKeys(strptimeCols) {
+		if renamed[name] {
+			continue
+		}
+		quoted := mustIdent(name)
+		replaces = append(replaces, "strptime(CAST("+quoted+" AS VARCHAR), "+sqlString(strptimeCols[name])+") AS "+quoted)
+	}
+	list := "*"
+	if len(excludes) > 0 {
+		list = "* EXCLUDE (" + strings.Join(excludes, ", ") + ")"
+	} else if len(replaces) > 0 {
+		return "* REPLACE (" + strings.Join(replaces, ", ") + ")"
+	}
+	if len(replaces) > 0 {
+		list += " REPLACE (" + strings.Join(replaces, ", ") + ")"
+	}
+	if len(extras) > 0 {
+		list += ", " + strings.Join(extras, ", ")
+	}
+	return list
+}
+
+func convertExpr(source, dest string, epochCols []string, strptimeCols map[string]string) string {
+	for _, name := range epochCols {
+		if name == dest {
+			return "epoch_ms(CAST(" + source + " AS BIGINT))"
+		}
+	}
+	if format, ok := strptimeCols[dest]; ok {
+		return "strptime(CAST(" + source + " AS VARCHAR), " + sqlString(format) + ")"
+	}
+	return source
+}
+
+func looseQuote(name string) string {
+	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
+}
+
+func mustIdent(name string) string {
+	quoted, err := QuoteIdent(name)
+	if err != nil {
+		return looseQuote(name)
+	}
+	return quoted
 }
 
 func describeQuery(ctx context.Context, db *sql.DB, query string) ([]Column, error) {

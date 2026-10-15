@@ -135,3 +135,31 @@ func TestTypeOverrideRejectsUnknownType(t *testing.T) {
 		t.Fatal("expected unsupported type")
 	}
 }
+
+func TestRenameAndStrptime(t *testing.T) {
+	dir := t.TempDir()
+	input := filepath.Join(dir, "alerts.csv")
+	body := "regno,alert time\nKA01,12 Oct 26 | 18:41:53\n"
+	if err := os.WriteFile(input, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(dir, "geofence.parquet")
+	result, err := Convert(context.Background(), ConvertOptions{
+		Input: input, Output: output, Header: true,
+		Rename: map[string]string{"alert time": "alert_time"},
+		Types:  map[string]string{"regno": "VARCHAR", "alert_time": "STRPTIME:%d %b %y | %H:%M:%S"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := map[string]string{}
+	for _, col := range result.Columns {
+		found[col.Name] = col.DuckType
+	}
+	if _, ok := found["alert time"]; ok {
+		t.Fatalf("original header kept %#v", found)
+	}
+	if found["alert_time"] != "TIMESTAMP" {
+		t.Fatalf("types %#v", found)
+	}
+}

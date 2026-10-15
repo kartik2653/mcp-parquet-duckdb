@@ -1,0 +1,20 @@
+description: Vehicle charging sessions. Each row is one session. There is no energy measurement in kWh.
+columns:
+  socgain:
+    description: Increase in state of charge during the session, not energy in kWh
+    unit: percent
+    aggregations: [sum, avg, min, max, count]
+  startsoc:
+    unit: percent
+    aggregations: [min, max, avg, count]
+  endsoc:
+    unit: percent
+    aggregations: [min, max, avg, count]
+  duration:
+    description: Session length
+    unit: ms
+    aggregations: [sum, avg, min, max, count]
+  vehicleid:
+    aggregations: [count, count_distinct]
+  regno:
+    aggregations: [count, count_distinct]

@@ -10,6 +10,18 @@ import (
 
 const viewName = "analytics_dataset"
 
+func fromRelation(cat *dataset.Catalog) string {
+	name := viewName
+	if cat != nil && cat.Relation() != "" {
+		name = cat.Relation()
+	}
+	quoted, err := dataset.QuoteIdent(name)
+	if err != nil {
+		return viewName
+	}
+	return quoted
+}
+
 type sqlBuilder struct {
 	args []any
 	loc  *time.Location
@@ -112,7 +124,7 @@ func BuildAnalyze(cat *dataset.Catalog, req AnalysisRequest, maxRows, maxGroups 
 		assumptions = append(assumptions, "rank is row_number over the requested sort, within the returned limit.")
 	}
 
-	sql := "SELECT " + strings.Join(selectList, ", ") + " FROM " + viewName
+	sql := "SELECT " + strings.Join(selectList, ", ") + " FROM " + fromRelation(cat)
 	if where != "" {
 		sql += " WHERE " + where
 	}
@@ -199,7 +211,7 @@ func BuildCompare(cat *dataset.Catalog, req CompareRequest, maxRows, maxGroups i
 	if order == "" {
 		order = "\"current_value\" DESC NULLS LAST"
 	}
-	sql := "SELECT " + strings.Join(selectList, ", ") + " FROM " + viewName
+	sql := "SELECT " + strings.Join(selectList, ", ") + " FROM " + fromRelation(cat)
 	if where != "" {
 		sql += " WHERE " + where
 	}

@@ -25,7 +25,8 @@ func run(logger *slog.Logger) error {
 	output := flag.String("output", "", "output Parquet path")
 	delimiter := flag.String("delimiter", ",", "field delimiter; use \\t for tab")
 	header := flag.Bool("header", true, "CSV has a header row")
-	types := flag.String("types", "", "column type overrides, for example vehicleid:VARCHAR,starttime:EPOCH_MS")
+	types := flag.String("types", "", "column type overrides, for example vehicleid:VARCHAR,starttime:EPOCH_MS,alert_time:STRPTIME:%d %b %y | %H:%M:%S")
+	rename := flag.String("rename", "", "header renames, for example alert time:alert_time")
 	sampleSize := flag.Int("sample-size", 0, "type sniff sample size; -1 scans the whole file; 0 uses the DuckDB default")
 	flag.Parse()
 	if *input == "" || *output == "" {
@@ -37,6 +38,7 @@ func run(logger *slog.Logger) error {
 		Delimiter: *delimiter,
 		Header:    *header,
 		Types:     parseTypes(*types),
+		Rename:    parseTypes(*rename),
 	}
 	if *sampleSize != 0 {
 		n := *sampleSize

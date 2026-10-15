@@ -12,15 +12,16 @@ import (
 func registerTools(server *sdkmcp.Server, engine *analytics.Engine, logger *slog.Logger) {
 	sdkmcp.AddTool(server, &sdkmcp.Tool{
 		Name: "describe_dataset",
-		Description: "Describe the configured dataset: column names, types, units, and which columns are metrics, dimensions, or time columns. " +
-			"Use this before other tools. It does not return dataset rows.",
+		Description: "Describe one configured dataset: column names, types, units, and roles. " +
+			"Pass dataset when more than one dataset is configured. Omitting it with several datasets lists them briefly. It does not return rows.",
 	}, func(ctx context.Context, _ *sdkmcp.CallToolRequest, in analytics.DescribeInput) (*sdkmcp.CallToolResult, analytics.DescribeResult, error) {
 		out, err := engine.Describe(in)
 		return nil, out, toolError(logger, err)
 	})
 	sdkmcp.AddTool(server, &sdkmcp.Tool{
 		Name: "analyze",
-		Description: "Aggregate the configured dataset. Use for averages, sums, counts, grouped totals, top-N, bottom-N, and time buckets. " +
+		Description: "Aggregate one configured dataset. Pass dataset when more than one is configured. " +
+			"Use for averages, sums, counts, grouped totals, top-N, bottom-N, and time buckets. " +
 			"avg is the unweighted mean of raw rows unless weight_column is set. Results are compact aggregates, never raw rows.",
 	}, func(ctx context.Context, _ *sdkmcp.CallToolRequest, in analytics.AnalyzeInput) (*sdkmcp.CallToolResult, analytics.AnalyzeResult, error) {
 		out, err := engine.Analyze(ctx, in)
@@ -41,6 +42,27 @@ func registerTools(server *sdkmcp.Server, engine *analytics.Engine, logger *slog
 			"and is null when the previous value is zero or missing. Requires a date or time column.",
 	}, func(ctx context.Context, _ *sdkmcp.CallToolRequest, in analytics.CompareInput) (*sdkmcp.CallToolResult, analytics.CompareResult, error) {
 		out, err := engine.Compare(ctx, in)
+		return nil, out, toolError(logger, err)
+	})
+	sdkmcp.AddTool(server, &sdkmcp.Tool{
+		Name:        "list_datasets",
+		Description: "List the configured datasets by name and description. It does not return rows or file paths.",
+	}, func(ctx context.Context, _ *sdkmcp.CallToolRequest, _ struct{}) (*sdkmcp.CallToolResult, []analytics.DatasetBrief, error) {
+		return nil, engine.ListDatasets(), nil
+	})
+	sdkmcp.AddTool(server, &sdkmcp.Tool{
+		Name:        "list_relationships",
+		Description: "List explicitly configured dataset relationships and join keys. Matching column names are not relationships. An empty list means no join is registered.",
+	}, func(ctx context.Context, _ *sdkmcp.CallToolRequest, _ struct{}) (*sdkmcp.CallToolResult, []analytics.RelationshipInfo, error) {
+		return nil, engine.ListRelationships(), nil
+	})
+	sdkmcp.AddTool(server, &sdkmcp.Tool{
+		Name: "cross_dataset_query",
+		Description: "Join configured datasets only through a registered relationship. " +
+			"Aggregate each dataset to the relationship keys before joining when either side can duplicate those keys. " +
+			"socgain is state-of-charge percentage points, not energy in kWh. Results are aggregates, never raw rows.",
+	}, func(ctx context.Context, _ *sdkmcp.CallToolRequest, in analytics.CrossInput) (*sdkmcp.CallToolResult, analytics.CrossResult, error) {
+		out, err := engine.CrossDataset(ctx, in)
 		return nil, out, toolError(logger, err)
 	})
 }

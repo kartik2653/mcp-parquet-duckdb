@@ -26,6 +26,7 @@ type Metadata struct {
 type Catalog struct {
 	Name        string
 	Description string
+	relation    string
 	columns     []Column
 	byName      map[string]Column
 }
@@ -96,6 +97,18 @@ func knownAggregation(agg string) bool {
 		return false
 	}
 }
+
+// SetRelation records the DuckDB view name for this dataset.
+func (c *Catalog) SetRelation(name string) error {
+	if !ValidIdent(name) {
+		return ErrInvalidIdent
+	}
+	c.relation = name
+	return nil
+}
+
+// Relation returns the DuckDB view name. It is empty until SetRelation is called.
+func (c *Catalog) Relation() string { return c.relation }
 
 // Columns returns a copy of the schema.
 func (c *Catalog) Columns() []Column {

@@ -2,6 +2,8 @@ package analytics
 
 import (
 	"context"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/Intellicars/intellicarai/internal/dataset"
@@ -52,6 +54,7 @@ type AnalyzeResult struct {
 	Truncated   bool              `json:"truncated"`
 	Assumptions []string          `json:"assumptions"`
 	Units       map[string]string `json:"units,omitempty"`
+	Warnings    []string          `json:"warnings,omitempty"`
 }
 
 // CompareInput is the compare_periods tool payload.
@@ -111,7 +114,11 @@ type StatsInput struct {
 
 // StatisticalAnalysis parses tool input and runs Statistics.
 func (e *Engine) StatisticalAnalysis(ctx context.Context, in StatsInput) (StatsResult, error) {
-	filters, err := e.parseFilters(in.Filters)
+	cat, err := e.dataset(in.Dataset)
+	if err != nil {
+		return StatsResult{}, err
+	}
+	filters, err := e.parseFilters(cat, in.Filters)
 	if err != nil {
 		return StatsResult{}, err
 	}
@@ -128,6 +135,7 @@ func (e *Engine) StatisticalAnalysis(ctx context.Context, in StatsInput) (StatsR
 }
 
 type DescribeInput struct {
+	Dataset string   `json:"dataset,omitempty"`
 	Columns []string `json:"columns,omitempty"`
 	Search  string   `json:"search,omitempty"`
 }
@@ -147,18 +155,30 @@ type DescribeColumn struct {
 
 // DescribeResult describes the dataset without returning rows.
 type DescribeResult struct {
-	Dataset     string           `json:"dataset"`
+	Dataset     string           `json:"dataset,omitempty"`
 	Description string           `json:"description,omitempty"`
-	Columns     []DescribeColumn `json:"columns"`
+	Columns     []DescribeColumn `json:"columns,omitempty"`
+	Datasets    []DatasetBrief   `json:"datasets,omitempty"`
+}
+
+// DatasetBrief is a short catalog entry.
+type DatasetBrief struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	ColumnCount int    `json:"column_count"`
 }
 
 // Analyze runs a validated aggregate query.
 func (e *Engine) Analyze(ctx context.Context, in AnalyzeInput) (AnalyzeResult, error) {
-	req, err := e.analysisRequest(in)
+	cat, err := e.dataset(in.Dataset)
 	if err != nil {
 		return AnalyzeResult{}, err
 	}
-	query, limit, assumptions, err := BuildAnalyze(e.catalog, req, e.cfg.MaxResultRows, e.cfg.MaxGroups, e.loc)
+	req, err := e.analysisRequest(cat, in)
+	if err != nil {
+		return AnalyzeResult{}, err
+	}
+	query, limit, assumptions, err := BuildAnalyze(cat, req, e.cfg.MaxResultRows, e.cfg.MaxGroups, e.loc)
 	if err != nil {
 		return AnalyzeResult{}, err
 	}
@@ -168,22 +188,27 @@ func (e *Engine) Analyze(ctx context.Context, in AnalyzeInput) (AnalyzeResult, e
 	}
 	rows, truncated := trimLimit(rows, limit)
 	return AnalyzeResult{
-		Dataset:     e.catalog.Name,
+		Dataset:     cat.Name,
 		Rows:        rows,
 		RowCount:    len(rows),
 		Truncated:   truncated,
 		Assumptions: assumptions,
-		Units:       metricUnits(e.catalog, req.Metrics),
+		Units:       metricUnits(cat, req.Metrics),
+		Warnings:    columnWarnings(cat, req.Metrics),
 	}, nil
 }
 
 // Compare runs a two-period comparison.
 func (e *Engine) Compare(ctx context.Context, in CompareInput) (CompareResult, error) {
-	req, unit, err := e.compareRequest(in)
+	cat, err := e.dataset(in.Dataset)
 	if err != nil {
 		return CompareResult{}, err
 	}
-	query, limit, err := BuildCompare(e.catalog, req, e.cfg.MaxResultRows, e.cfg.MaxGroups, e.loc)
+	req, unit, err := e.compareRequest(cat, in)
+	if err != nil {
+		return CompareResult{}, err
+	}
+	query, limit, err := BuildCompare(cat, req, e.cfg.MaxResultRows, e.cfg.MaxGroups, e.loc)
 	if err != nil {
 		return CompareResult{}, err
 	}
@@ -219,7 +244,7 @@ func (e *Engine) Compare(ctx context.Context, in CompareInput) (CompareResult, e
 		out = append(out, item)
 	}
 	return CompareResult{
-		Dataset: e.catalog.Name, Rows: out, Truncated: truncated, Unit: unit,
+		Dataset: cat.Name, Rows: out, Truncated: truncated, Unit: unit,
 		Method: "((current - previous) / previous) * 100 when previous is nonzero",
 		Assumptions: []string{
 			"Periods are half-open: start inclusive, end exclusive.",
@@ -232,30 +257,22 @@ func (e *Engine) Compare(ctx context.Context, in CompareInput) (CompareResult, e
 
 // Describe returns catalog metadata.
 func (e *Engine) Describe(in DescribeInput) (DescribeResult, error) {
-	cols, err := e.catalog.Select(in.Columns, in.Search)
+	if in.Dataset == "" && len(e.catalogs) > 1 {
+		out := DescribeResult{Datasets: make([]DatasetBrief, 0, len(e.catalogs))}
+		for _, cat := range e.catalogList() {
+			out.Datasets = append(out.Datasets, DatasetBrief{Name: cat.Name, Description: cat.Description, ColumnCount: len(cat.Columns())})
+		}
+		return out, nil
+	}
+	cat, err := e.dataset(in.Dataset)
 	if err != nil {
-		return DescribeResult{}, invalid(err.Error())
+		return DescribeResult{}, err
 	}
-	out := make([]DescribeColumn, 0, len(cols))
-	for _, col := range cols {
-		role := "dimension"
-		if col.Kind == "numeric" {
-			role = "metric"
-		}
-		if col.Temporal() {
-			role = "time"
-		}
-		out = append(out, DescribeColumn{
-			Name: col.Name, BusinessName: col.BusinessName, Type: col.DuckType,
-			Kind: string(col.Kind), Nullable: col.Nullable, Unit: col.Unit,
-			Description: col.Description, Aggregations: col.ApprovedAggregations, Role: role,
-		})
-	}
-	return DescribeResult{Dataset: e.catalog.Name, Description: e.catalog.Description, Columns: out}, nil
+	return describeCatalog(cat, in.Columns, in.Search)
 }
 
-func (e *Engine) analysisRequest(in AnalyzeInput) (AnalysisRequest, error) {
-	filters, err := e.parseFilters(in.Filters)
+func (e *Engine) analysisRequest(cat *dataset.Catalog, in AnalyzeInput) (AnalysisRequest, error) {
+	filters, err := e.parseFilters(cat, in.Filters)
 	if err != nil {
 		return AnalysisRequest{}, err
 	}
@@ -274,8 +291,8 @@ func (e *Engine) analysisRequest(in AnalyzeInput) (AnalysisRequest, error) {
 	}, nil
 }
 
-func (e *Engine) compareRequest(in CompareInput) (CompareRequest, string, error) {
-	filters, err := e.parseFilters(in.Filters)
+func (e *Engine) compareRequest(cat *dataset.Catalog, in CompareInput) (CompareRequest, string, error) {
+	filters, err := e.parseFilters(cat, in.Filters)
 	if err != nil {
 		return CompareRequest{}, "", err
 	}
@@ -297,7 +314,7 @@ func (e *Engine) compareRequest(in CompareInput) (CompareRequest, string, error)
 	}
 	unit := ""
 	if in.Column != "" {
-		if col, ok := e.catalog.Column(in.Column); ok {
+		if col, ok := cat.Column(in.Column); ok {
 			unit = col.Unit
 		}
 	}
@@ -311,10 +328,10 @@ func (e *Engine) compareRequest(in CompareInput) (CompareRequest, string, error)
 	}, unit, nil
 }
 
-func (e *Engine) parseFilters(inputs []FilterInput) ([]Filter, error) {
+func (e *Engine) parseFilters(cat *dataset.Catalog, inputs []FilterInput) ([]Filter, error) {
 	out := make([]Filter, 0, len(inputs))
 	for _, in := range inputs {
-		col, err := requireColumn(e.catalog, in.Column)
+		col, err := requireColumn(cat, in.Column)
 		if err != nil {
 			return nil, err
 		}
@@ -342,6 +359,51 @@ func (e *Engine) parseFilters(inputs []FilterInput) ([]Filter, error) {
 		out = append(out, filter)
 	}
 	return out, nil
+}
+
+func (e *Engine) catalogList() []*dataset.Catalog {
+	out := make([]*dataset.Catalog, 0, len(e.catalogs))
+	for _, cat := range e.catalogs {
+		out = append(out, cat)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+func describeCatalog(cat *dataset.Catalog, columns []string, search string) (DescribeResult, error) {
+	cols, err := cat.Select(columns, search)
+	if err != nil {
+		return DescribeResult{}, invalid(err.Error())
+	}
+	out := make([]DescribeColumn, 0, len(cols))
+	for _, col := range cols {
+		role := "dimension"
+		if col.Kind == "numeric" {
+			role = "metric"
+		}
+		if col.Temporal() {
+			role = "time"
+		}
+		out = append(out, DescribeColumn{
+			Name: col.Name, BusinessName: col.BusinessName, Type: col.DuckType,
+			Kind: string(col.Kind), Nullable: col.Nullable, Unit: col.Unit,
+			Description: col.Description, Aggregations: col.ApprovedAggregations, Role: role,
+		})
+	}
+	return DescribeResult{Dataset: cat.Name, Description: cat.Description, Columns: out}, nil
+}
+
+func columnWarnings(cat *dataset.Catalog, metrics []Metric) []string {
+	var warnings []string
+	for _, metric := range metrics {
+		if metric.Column == "socgain" {
+			warnings = append(warnings, "socgain is SOC percentage points, not energy in kWh")
+		}
+		if col, ok := cat.Column(metric.Column); ok && strings.Contains(strings.ToLower(col.Description), "not energy") {
+			warnings = append(warnings, col.Description)
+		}
+	}
+	return warnings
 }
 
 func (e *Engine) parseRange(start, end string) (*time.Time, *time.Time, error) {

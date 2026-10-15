@@ -1,9 +1,24 @@
 listen_addr: ":8080"
 transport: http
-parquet_path: ./data/parquet/trips.parquet
-dataset_name: trips
-dataset_description: Synthetic fleet trips for local analytics
-metadata_path: ./configs/trips.metadata.example.yaml
+data_dir: ./data/parquet
+datasets:
+  - name: charge
+    file: ./data/parquet/charge.parquet
+    description: Vehicle charging records
+    metadata: ./configs/charge.metadata.yaml
+  - name: distance
+    file: ./data/parquet/distance.parquet
+    description: Vehicle trip and distance records
+    metadata: ./configs/distance.metadata.yaml
+  - name: geofence
+    file: ./data/parquet/geofence.parquet
+    description: Geofence-related records
+    metadata: ./configs/geofence.metadata.yaml
+  - name: alert_report
+    file: ./data/parquet/alert_report.parquet
+    description: Vehicle alerts and report records
+    metadata: ./configs/alert_report.metadata.yaml
+relationships: []
 duckdb_memory_limit: 512MB
 temp_dir: ./data/tmp
 query_timeout: 30s

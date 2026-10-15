@@ -1,0 +1,13 @@
+description: Vehicle trip and distance records. Each row is one trip.
+columns:
+  distance:
+    unit: km
+    aggregations: [sum, avg, min, max, count]
+  socconsumed:
+    description: State of charge used during the trip, not energy in kWh
+    unit: percent
+    aggregations: [sum, avg, min, max, count]
+  vehicleid:
+    aggregations: [count, count_distinct]
+  regno:
+    aggregations: [count, count_distinct]

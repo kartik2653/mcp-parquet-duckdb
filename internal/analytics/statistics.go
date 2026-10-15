@@ -81,7 +81,8 @@ type StatsResult struct {
 
 // Statistics executes the requested statistical operations inside DuckDB.
 func (e *Engine) Statistics(ctx context.Context, req StatsRequest) (StatsResult, error) {
-	if err := checkDataset(e.catalog, req.Dataset); err != nil {
+	cat, err := e.dataset(req.Dataset)
+	if err != nil {
 		return StatsResult{}, err
 	}
 	if len(req.Columns) == 0 {
@@ -97,7 +98,7 @@ func (e *Engine) Statistics(ctx context.Context, req StatsRequest) (StatsResult,
 	}
 	cols := make([]dataset.Column, 0, len(req.Columns))
 	for _, name := range req.Columns {
-		col, err := requireColumn(e.catalog, name)
+		col, err := requireColumn(cat, name)
 		if err != nil {
 			return StatsResult{}, err
 		}
@@ -118,15 +119,15 @@ func (e *Engine) Statistics(ctx context.Context, req StatsRequest) (StatsResult,
 		return StatsResult{}, err
 	}
 	b := &sqlBuilder{loc: e.loc}
-	where, err := b.where(e.catalog, req.Filters, req.TimeColumn, req.TimeStart, req.TimeEnd)
+	where, err := b.where(cat, req.Filters, req.TimeColumn, req.TimeStart, req.TimeEnd)
 	if err != nil {
 		return StatsResult{}, err
 	}
-	summary, assumptions, err := e.summaryQuery(ctx, cols, req, percentiles, where, b, limit)
+	summary, assumptions, err := e.summaryQuery(ctx, cat, cols, req, percentiles, where, b, limit)
 	if err != nil {
 		return StatsResult{}, err
 	}
-	result := StatsResult{Dataset: e.catalog.Name, Assumptions: assumptions}
+	result := StatsResult{Dataset: cat.Name, Assumptions: assumptions}
 	if len(req.GroupBy) == 0 {
 		if len(summary) == 0 {
 			summary = []map[string]any{{}}
@@ -144,7 +145,7 @@ func (e *Engine) Statistics(ctx context.Context, req StatsRequest) (StatsResult,
 		}
 	}
 	if containsStat(req.Statistics, "correlation") {
-		corr, truncated, err := e.correlation(ctx, req, where, b.args, limit)
+		corr, truncated, err := e.correlation(ctx, cat, req, where, b.args, limit)
 		if err != nil {
 			return StatsResult{}, err
 		}
@@ -152,12 +153,12 @@ func (e *Engine) Statistics(ctx context.Context, req StatsRequest) (StatsResult,
 		result.Truncated = result.Truncated || truncated
 	}
 	if containsStat(req.Statistics, "outliers") && len(req.GroupBy) == 0 {
-		if err := e.attachOutliers(ctx, result.Columns, cols, where, b.args); err != nil {
+		if err := e.attachOutliers(ctx, cat, result.Columns, cols, where, b.args); err != nil {
 			return StatsResult{}, err
 		}
 	}
 	if containsStat(req.Statistics, "distribution") && len(req.GroupBy) == 0 {
-		if err := e.attachDistributions(ctx, result.Columns, cols, where, b.args, req.HistogramBins); err != nil {
+		if err := e.attachDistributions(ctx, cat, result.Columns, cols, where, b.args, req.HistogramBins); err != nil {
 			return StatsResult{}, err
 		}
 	}
@@ -207,7 +208,7 @@ func normalizePercentiles(req StatsRequest) ([]float64, error) {
 	return out, nil
 }
 
-func (e *Engine) summaryQuery(ctx context.Context, cols []dataset.Column, req StatsRequest, percentiles []float64, where string, b *sqlBuilder, limit int) ([]map[string]any, []string, error) {
+func (e *Engine) summaryQuery(ctx context.Context, cat *dataset.Catalog, cols []dataset.Column, req StatsRequest, percentiles []float64, where string, b *sqlBuilder, limit int) ([]map[string]any, []string, error) {
 	var selectList []string
 	assumptions := []string{
 		"Nulls are ignored by aggregates.",
@@ -253,7 +254,7 @@ func (e *Engine) summaryQuery(ctx context.Context, cols []dataset.Column, req St
 	}
 	var groupList []string
 	for _, name := range req.GroupBy {
-		col, err := requireColumn(e.catalog, name)
+		col, err := requireColumn(cat, name)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -264,7 +265,7 @@ func (e *Engine) summaryQuery(ctx context.Context, cols []dataset.Column, req St
 		selectList = append(selectList, quoted)
 		groupList = append(groupList, quoted)
 	}
-	sql := "SELECT " + strings.Join(selectList, ", ") + " FROM " + viewName
+	sql := "SELECT " + strings.Join(selectList, ", ") + " FROM " + fromRelation(cat)
 	if where != "" {
 		sql += " WHERE " + where
 	}
@@ -345,7 +346,7 @@ func (e *Engine) readColumnStats(row map[string]any, cols []dataset.Column, req 
 	return out
 }
 
-func (e *Engine) correlation(ctx context.Context, req StatsRequest, where string, args []any, limit int) ([]CorrelationStat, bool, error) {
+func (e *Engine) correlation(ctx context.Context, cat *dataset.Catalog, req StatsRequest, where string, args []any, limit int) ([]CorrelationStat, bool, error) {
 	pair := req.Correlation
 	if len(pair) == 0 && len(req.Columns) == 2 {
 		pair = req.Columns
@@ -353,11 +354,11 @@ func (e *Engine) correlation(ctx context.Context, req StatsRequest, where string
 	if len(pair) != 2 {
 		return nil, false, invalid("correlation requires exactly two numeric columns")
 	}
-	left, err := requireColumn(e.catalog, pair[0])
+	left, err := requireColumn(cat, pair[0])
 	if err != nil {
 		return nil, false, err
 	}
-	right, err := requireColumn(e.catalog, pair[1])
+	right, err := requireColumn(cat, pair[1])
 	if err != nil {
 		return nil, false, err
 	}
@@ -388,7 +389,7 @@ func (e *Engine) correlation(ctx context.Context, req StatsRequest, where string
 		"var_samp("+lq+") AS left_variance",
 		"var_samp("+rq+") AS right_variance",
 	)
-	sqlText := "SELECT " + strings.Join(selectList, ", ") + " FROM " + viewName
+	sqlText := "SELECT " + strings.Join(selectList, ", ") + " FROM " + fromRelation(cat)
 	if where != "" {
 		sqlText += " WHERE " + where
 	}
@@ -432,7 +433,7 @@ func (e *Engine) correlation(ctx context.Context, req StatsRequest, where string
 	return out, truncated, nil
 }
 
-func (e *Engine) attachOutliers(ctx context.Context, stats []ColumnStat, cols []dataset.Column, where string, args []any) error {
+func (e *Engine) attachOutliers(ctx context.Context, cat *dataset.Catalog, stats []ColumnStat, cols []dataset.Column, where string, args []any) error {
 	for i, col := range cols {
 		if col.Kind != dataset.KindNumeric {
 			return invalid("outlier detection requires a numeric column")
@@ -441,7 +442,7 @@ func (e *Engine) attachOutliers(ctx context.Context, stats []ColumnStat, cols []
 		if err != nil {
 			return err
 		}
-		sqlText := "SELECT quantile_cont(" + quoted + ", 0.25) AS q1, quantile_cont(" + quoted + ", 0.75) AS q3, count(" + quoted + ") AS sample_size FROM " + viewName
+		sqlText := "SELECT quantile_cont(" + quoted + ", 0.25) AS q1, quantile_cont(" + quoted + ", 0.75) AS q3, count(" + quoted + ") AS sample_size FROM " + fromRelation(cat)
 		if where != "" {
 			sqlText += " WHERE " + where
 		}
@@ -459,10 +460,10 @@ func (e *Engine) attachOutliers(ctx context.Context, stats []ColumnStat, cols []
 			upper := *q3 + 1.5*iqr
 			outlier.LowerFence = &lower
 			outlier.UpperFence = &upper
-			countSQL := "SELECT count(*) AS outlier_count FROM " + viewName + " WHERE " + quoted + " IS NOT NULL AND (" + quoted + " < ? OR " + quoted + " > ?)"
+			countSQL := "SELECT count(*) AS outlier_count FROM " + fromRelation(cat) + " WHERE " + quoted + " IS NOT NULL AND (" + quoted + " < ? OR " + quoted + " > ?)"
 			countArgs := append(append([]any{}, args...), lower, upper)
 			if where != "" {
-				countSQL = "SELECT count(*) AS outlier_count FROM " + viewName + " WHERE (" + where + ") AND " + quoted + " IS NOT NULL AND (" + quoted + " < ? OR " + quoted + " > ?)"
+				countSQL = "SELECT count(*) AS outlier_count FROM " + fromRelation(cat) + " WHERE (" + where + ") AND " + quoted + " IS NOT NULL AND (" + quoted + " < ? OR " + quoted + " > ?)"
 			}
 			counted, err := e.queryRow(ctx, Query{SQL: countSQL, Args: countArgs})
 			if err != nil {
@@ -477,7 +478,7 @@ func (e *Engine) attachOutliers(ctx context.Context, stats []ColumnStat, cols []
 	return nil
 }
 
-func (e *Engine) attachDistributions(ctx context.Context, stats []ColumnStat, cols []dataset.Column, where string, args []any, bins int) error {
+func (e *Engine) attachDistributions(ctx context.Context, cat *dataset.Catalog, stats []ColumnStat, cols []dataset.Column, where string, args []any, bins int) error {
 	if bins <= 0 || bins > e.cfg.MaxHistogramBins {
 		bins = e.cfg.MaxHistogramBins
 	}
@@ -489,7 +490,7 @@ func (e *Engine) attachDistributions(ctx context.Context, stats []ColumnStat, co
 		if err != nil {
 			return err
 		}
-		sqlText := "SELECT min(CAST(" + quoted + " AS DOUBLE)) AS lo, max(CAST(" + quoted + " AS DOUBLE)) AS hi, count(" + quoted + ") AS sample_size FROM " + viewName
+		sqlText := "SELECT min(CAST(" + quoted + " AS DOUBLE)) AS lo, max(CAST(" + quoted + " AS DOUBLE)) AS hi, count(" + quoted + ") AS sample_size FROM " + fromRelation(cat)
 		if where != "" {
 			sqlText += " WHERE " + where
 		}
@@ -508,7 +509,7 @@ func (e *Engine) attachDistributions(ctx context.Context, stats []ColumnStat, co
 				dist.Bins = []HistBin{{Bin: 1, Lower: *lo, Upper: *hi, Count: n}}
 			} else {
 				expr := fmt.Sprintf("least(greatest(CAST(floor((CAST(%s AS DOUBLE) - %s) / ((%s - %s) / %d)) AS INTEGER) + 1, 1), %d)", quoted, formatFloat(*lo), formatFloat(*hi), formatFloat(*lo), bins, bins)
-				histSQL := "SELECT " + expr + " AS bucket, count(*) AS n FROM " + viewName
+				histSQL := "SELECT " + expr + " AS bucket, count(*) AS n FROM " + fromRelation(cat)
 				var histArgs []any
 				if where != "" {
 					histSQL += " WHERE (" + where + ") AND " + quoted + " IS NOT NULL"

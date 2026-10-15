@@ -18,6 +18,7 @@ type ConvertOptions struct {
 	Delimiter   string
 	Header      bool
 	Types       map[string]string
+	Rename      map[string]string
 	SampleSize  *int
 	NullStrings []string
 }
@@ -32,6 +33,7 @@ type ConvertResult struct {
 }
 
 var decimalType = regexp.MustCompile(`^DECIMAL\([0-9]{1,2},[0-9]{1,2}\)$`)
+var strptimeFormat = regexp.MustCompile(`^[%A-Za-z0-9 :|-]+$`)
 
 func validateOptions(opt *ConvertOptions) error {
 	if opt.Delimiter == "" {
@@ -83,6 +85,14 @@ func validateOptions(opt *ConvertOptions) error {
 		}
 		opt.Types[name] = canon
 	}
+	for src, dst := range opt.Rename {
+		if strings.TrimSpace(src) == "" || strings.ContainsAny(src, "\"\n\r") {
+			return fmt.Errorf("rename source is invalid")
+		}
+		if !ValidIdent(dst) {
+			return fmt.Errorf("rename target is not an identifier")
+		}
+	}
 	if opt.SampleSize != nil && *opt.SampleSize < -1 {
 		return fmt.Errorf("sample size must be -1 or greater")
 	}
@@ -95,6 +105,12 @@ func canonicalType(typ string) (string, bool) {
 	case "BOOLEAN", "TINYINT", "SMALLINT", "INTEGER", "BIGINT", "FLOAT", "DOUBLE", "VARCHAR", "DATE", "TIME", "TIMESTAMP", "TIMESTAMPTZ", "EPOCH_MS":
 		return u, true
 	default:
+		if format, ok := strings.CutPrefix(typ, "STRPTIME:"); ok {
+			if !strptimeFormat.MatchString(format) {
+				return "", false
+			}
+			return "STRPTIME:" + format, true
+		}
 		if decimalType.MatchString(u) {
 			return u, true
 		}

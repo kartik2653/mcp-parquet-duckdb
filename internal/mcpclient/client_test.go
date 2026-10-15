@@ -108,7 +108,7 @@ func TestHTTPDiscoveryAndCall(t *testing.T) {
 			t.Fatalf("missing schema %s", tool.Name)
 		}
 	}
-	for _, name := range []string{"describe_dataset", "analyze", "statistical_analysis", "compare_periods"} {
+	for _, name := range []string{"describe_dataset", "analyze", "statistical_analysis", "compare_periods", "list_datasets", "list_relationships", "cross_dataset_query"} {
 		if !names[name] {
 			t.Fatalf("missing %s in %v", name, names)
 		}

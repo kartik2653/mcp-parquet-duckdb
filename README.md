@@ -40,7 +40,7 @@ go run ./scripts/convert_csv.go \
 
 Empty fields and the tokens `NULL` and `null` are written as SQL nulls. The command checks that the input exists, writes `output.partial`, checks the Parquet row count and schema, and renames the file into place only after that succeeds. It refuses to use the CSV path as the output. Column names must be identifiers: a letter or underscore, then letters, digits, and underscores.
 
-`make convert` runs the sample command above.
+`make convert` runs the sample command above, writing `data/parquet/trips.parquet`, and also writes the four dataset Parquet files.
 
 ## Statistical methods
 
@@ -139,6 +139,38 @@ The image does not contain a dataset. The container runs as uid 65532, with a re
 
 `go test ./...` covers conversion, schema discovery, overrides, aggregates, filters, sort and limit, time ranges, period comparison, statistics, nulls, invalid columns and operators, a zero denominator, SQL injection text, a missing Parquet path, query cancellation, truncation, and MCP tool calls over the in-memory and HTTP transports. No external database or API key is required.
 
+## Datasets
+
+`make convert` writes `data/parquet/trips.parquet` and the four dataset Parquet files from the CSVs in `testdata`. `make convert-datasets` writes only those four files:
+
+- `charges.csv` becomes `charge`. Times are epoch milliseconds. `socgain` is an SOC percentage-point change. The file has no kWh column.
+- `trips.csv` becomes `distance`.
+- `geofences.csv` becomes `geofence`. The header `alert time` is stored as `alert_time`.
+- `alerts.csv` becomes `alert_report`, with the same `alert_time` rename.
+
+The example config registers those four names and an empty `relationships` list. A shared column name is not a join. Add a relationship only when the keys and cardinality are known:
+
+```yaml
+relationships:
+  - name: vehicle_charge
+    left: distance
+    right: charge
+    cardinality: many_to_many
+    keys:
+      - left: vehicleid
+        right: vehicleid
+```
+
+`cross_dataset_query` rejects that join until each source is aggregated to `vehicleid`, because both datasets can contain many rows for one vehicle. `list_datasets`, `describe_dataset`, and `list_relationships` expose the catalog. `analyze`, `statistical_analysis`, and `compare_periods` still work with one configured dataset when `dataset` is omitted.
+
+If a configured Parquet file is missing, startup fails with `missing datasets:` and the missing names. Paths must stay inside `data_dir`.
+
+```bash
+make convert
+make test
+make run
+```
+
 ## Client
 
 The terminal client connects to this server, discovers its tools, and asks xAI Grok to choose those tools. Grok sees column metadata and aggregate results. It does not see the CSV or Parquet file, and it cannot submit SQL. The server still enforces allowlists, parameters, and limits.
@@ -162,19 +194,24 @@ Put `XAI_API_KEY` in `.env` before starting the client. `MCP_AUTH_TOKEN` must ma
 
 `configs/client.example.yaml` holds the server URL, timeouts, and tool-round limit. Do not commit a real key.
 
+At session start the client calls `list_datasets`, then `describe_dataset` for each name the server returns, then `list_relationships`. It does not assume `charge`, `distance`, `geofence`, or `alert_report` are present. Grok receives those catalog results, including units and cardinality. It does not receive CSV or Parquet rows. A follow-up stays in the same conversation, and each number still has to come from a tool call.
+
 Questions are ordinary sentences, for example:
 
-- Which columns are available for analysis?
-- How many records are in this dataset?
-- What is the average distance by vehicle?
-- Compare total distance for 14 October 2026 with the previous day.
-- Is there a correlation between distance and rangevalue?
-- Are there outliers in distance?
+- Which datasets and columns are available?
+- Calculate total distance by vehicle.
+- Compare distance travelled and charging activity by vehicle.
+- Which vehicles have distance records but no corresponding charging records?
+- Compare monthly distance and charging trends by fleet.
+- Which vehicles generated the most alerts per 100 kilometres?
+- Summarize distance, charging activity, geofence events, and alerts by vehicle.
 
-The sample trips start on 2026-10-14 UTC. A time filter has to name `time_column` because `starttime`, `endtime`, and `createdat` are all timestamps. The client puts that rule, plus the current UTC time and the `describe_dataset` result, in the model prompt. Answers are aggregates, not trip rows. Type `exit` or `quit`, or press Ctrl+C, to stop.
+A cross-dataset question runs only when `list_relationships` includes the join. With the example config that list is empty, so the client cannot compare distance with charging until you add a relationship. `socgain` is an SOC percentage-point change, not kWh. For a many-to-many relationship the client must aggregate each dataset to the join keys before `cross_dataset_query`. Server warnings about grain stay in the tool result and should appear in the answer.
+
+The sample trips start on 2026-10-14 UTC. A time filter has to name `time_column` because several timestamp columns exist, and their units differ by dataset. Answers are aggregates, not source rows. Type `exit` or `quit`, or press Ctrl+C, to stop.
 
 For a server you launch yourself over stdio, set `transport: stdio` and `server_command` in the client YAML. The child process does not inherit `XAI_API_KEY`.
 
 `go test ./...` uses a fake xAI server and an in-process analytics server. It does not call xAI. Set `MCP_URL` and `MCP_AUTH_TOKEN` to also run the test that talks to a server you already started.
 
-If the client cannot connect, confirm `make run` is listening and the bearer token matches. A 401 means the token is wrong. A timeout means the server or xAI did not answer within `request_timeout`. Tool-call loops stop after `max_tool_rounds`. The client does not store the conversation after it exits.
+If the client cannot connect, confirm `make run` is listening and the bearer token matches. A 401 means the token is wrong. A timeout means the server or xAI did not answer within `request_timeout`. Tool-call loops stop after `max_tool_rounds`. If startup reports `missing datasets:`, run `make convert` before `make run`. If a question needs a join and the relationship list is empty, the answer should say that no relationship is registered rather than guessing a key. The client does not store the conversation after it exits.

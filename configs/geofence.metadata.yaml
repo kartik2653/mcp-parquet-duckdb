@@ -1,0 +1,9 @@
+description: Geofence events. Each row is one event. The CSV header "alert time" is stored as alert_time.
+columns:
+  alert_time:
+    description: Event time. The CSV header is "alert time".
+  regno:
+    aggregations: [count, count_distinct]
+  soc:
+    unit: percent
+    aggregations: [min, max, avg, count]
