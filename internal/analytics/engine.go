@@ -142,6 +142,7 @@ func (e *Engine) query(ctx context.Context, q Query) ([]map[string]any, error) {
 	defer e.gate.Release()
 	ctx, cancel := context.WithTimeout(ctx, e.cfg.QueryTimeout)
 	defer cancel()
+	e.log.Info("query", "sql", q.SQL, "args", q.Args)
 	rows, err := e.db.QueryContext(ctx, q.SQL, q.Args...)
 	if err != nil {
 		return nil, e.wrapQueryError(ctx, err)

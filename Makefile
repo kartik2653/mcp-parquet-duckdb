@@ -1,4 +1,4 @@
-.PHONY: fmt vet test convert run docker
+.PHONY: fmt vet test convert run run-client docker
 
 fmt:
 	gofmt -w .
@@ -14,6 +14,9 @@ convert:
 
 run:
 	go run ./cmd/server
+
+run-client:
+	go run ./cmd/client
 
 docker:
 	docker build -t analytics-mcp .

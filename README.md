@@ -71,7 +71,7 @@ There is no `execute_sql` tool. Dataset names, column names, aggregations, opera
 
 ## Configuration
 
-`configs/config.example.yaml` lists every setting. Environment variables prefixed with `ANALYTICS_` override the file. `ANALYTICS_CONFIG` selects the YAML path. `.env.example` has placeholders only.
+`configs/config.example.yaml` lists every setting. The server and client read `.env` from the working directory at startup and apply those variables. A variable already set in the process is left unchanged. `.env.example` is the template. Copy it to `.env` and put the xAI key there. `.env` is not committed.
 
 HTTP transport requires `ANALYTICS_AUTH_TOKEN`. Stdio transport does not, because it trusts the local process. The default HTTP mode is stateless streamable HTTP so clients can negotiate protocol `2026-07-28`.
 
@@ -80,11 +80,13 @@ On startup the process allows DuckDB to read only the configured Parquet file an
 ## Run locally
 
 ```bash
+cp .env.example .env
 make test
 make convert
-export ANALYTICS_CONFIG=./configs/config.example.yaml
 make run
 ```
+
+Each analytics statement is written to the server stderr as JSON, with the SQL and its bound arguments, before DuckDB runs it.
 
 The sample client entry is:
 
@@ -126,12 +128,53 @@ Convert the CSV on the host, then mount the Parquet directory read-only:
 
 ```bash
 make convert
-export ANALYTICS_AUTH_TOKEN=change-me
 docker compose up --build
 ```
+
+Compose reads `ANALYTICS_AUTH_TOKEN` from the `.env` file in this directory.
 
 The image does not contain a dataset. The container runs as uid 65532, with a read-only root filesystem and a writable `/tmp` for DuckDB spill files.
 
 ## Tests
 
 `go test ./...` covers conversion, schema discovery, overrides, aggregates, filters, sort and limit, time ranges, period comparison, statistics, nulls, invalid columns and operators, a zero denominator, SQL injection text, a missing Parquet path, query cancellation, truncation, and MCP tool calls over the in-memory and HTTP transports. No external database or API key is required.
+
+## Client
+
+The terminal client connects to this server, discovers its tools, and asks xAI Grok to choose those tools. Grok sees column metadata and aggregate results. It does not see the CSV or Parquet file, and it cannot submit SQL. The server still enforces allowlists, parameters, and limits.
+
+```text
+question → client → Grok → MCP tool → DuckDB aggregate → Grok explanation
+```
+
+Start the server in one terminal, then the client in another:
+
+```bash
+make convert
+make run
+```
+
+```bash
+make run-client
+```
+
+Put `XAI_API_KEY` in `.env` before starting the client. `MCP_AUTH_TOKEN` must match `ANALYTICS_AUTH_TOKEN`. The key is sent only to `https://api.x.ai/v1/chat/completions`. The model name is the `XAI_MODEL` value from `.env`. If the account rejects `grok-4.6`, the client reports that error and does not switch models.
+
+`configs/client.example.yaml` holds the server URL, timeouts, and tool-round limit. Do not commit a real key.
+
+Questions are ordinary sentences, for example:
+
+- Which columns are available for analysis?
+- How many records are in this dataset?
+- What is the average distance by vehicle?
+- Compare total distance for 14 October 2026 with the previous day.
+- Is there a correlation between distance and rangevalue?
+- Are there outliers in distance?
+
+The sample trips start on 2026-10-14 UTC. A time filter has to name `time_column` because `starttime`, `endtime`, and `createdat` are all timestamps. The client puts that rule, plus the current UTC time and the `describe_dataset` result, in the model prompt. Answers are aggregates, not trip rows. Type `exit` or `quit`, or press Ctrl+C, to stop.
+
+For a server you launch yourself over stdio, set `transport: stdio` and `server_command` in the client YAML. The child process does not inherit `XAI_API_KEY`.
+
+`go test ./...` uses a fake xAI server and an in-process analytics server. It does not call xAI. Set `MCP_URL` and `MCP_AUTH_TOKEN` to also run the test that talks to a server you already started.
+
+If the client cannot connect, confirm `make run` is listening and the bearer token matches. A 401 means the token is wrong. A timeout means the server or xAI did not answer within `request_timeout`. Tool-call loops stop after `max_tool_rounds`. The client does not store the conversation after it exits.

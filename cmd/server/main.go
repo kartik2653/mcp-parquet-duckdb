@@ -12,6 +12,7 @@ import (
 
 	"github.com/Intellicars/intellicarai/internal/analytics"
 	"github.com/Intellicars/intellicarai/internal/config"
+	"github.com/Intellicars/intellicarai/internal/envfile"
 	"github.com/Intellicars/intellicarai/internal/mcp"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -25,6 +26,9 @@ func main() {
 }
 
 func run(logger *slog.Logger) error {
+	if err := envfile.Load(".env"); err != nil {
+		return err
+	}
 	cfg, err := config.Load("")
 	if err != nil {
 		return err

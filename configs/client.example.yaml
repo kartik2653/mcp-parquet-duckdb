@@ -1,0 +1,15 @@
+transport: http
+server_url: http://127.0.0.1:8080/mcp
+request_timeout: 60s
+max_tool_rounds: 8
+max_history_messages: 20
+max_tool_result_bytes: 16384
+log_level: info
+model: grok-4.6
+base_url: https://api.x.ai/v1
+# Stdio instead of HTTP:
+# transport: stdio
+# server_command:
+#   - go
+#   - run
+#   - ./cmd/server

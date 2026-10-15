@@ -1,0 +1,2 @@
+regno,chassisno,deviceid,alert time,alertname,alertlevel,cpuusage
+ABCD1234,CHABCD1234,89A0DEE57D970765,15 Oct 26 | 05:13:02,Alert,LOW,14250
